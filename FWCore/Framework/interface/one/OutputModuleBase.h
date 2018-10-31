@@ -25,6 +25,7 @@
 #include <vector>
 #include <map>
 #include <atomic>
+#include <set>
 
 // user include files
 #include "DataFormats/Provenance/interface/BranchID.h"
@@ -45,6 +46,7 @@
 // forward declarations
 namespace edm {
 
+  class MergeableRunProductMetadata;
   class ModuleCallingContext;
   class PreallocationConfiguration;
   class ActivityRegistry;
@@ -95,13 +97,16 @@ namespace edm {
       static void prevalidate(ConfigurationDescriptions& );
       
       //Output modules always need writeRun and writeLumi to be called
-      bool wantsGlobalRuns() const {return true;}
-      bool wantsGlobalLuminosityBlocks() const {return true;}
+      virtual bool wantsGlobalRuns() const = 0;
+      virtual bool wantsGlobalLuminosityBlocks() const = 0;
       bool wantsStreamRuns() const {return false;}
       bool wantsStreamLuminosityBlocks() const {return false;};
 
       SerialTaskQueue* globalRunsQueue() { return &runQueue_;}
       SerialTaskQueue* globalLuminosityBlocksQueue() { return &luminosityBlockQueue_;}
+      SharedResourcesAcquirer& sharedResourcesAcquirer() {
+        return resourcesAcquirer_;
+      }
 
       bool wantAllEvents() const {return wantAllEvents_;}
       
@@ -203,7 +208,7 @@ namespace edm {
       
       virtual SharedResourcesAcquirer createAcquirer();
       
-      void doWriteRun(RunPrincipal const& rp, ModuleCallingContext const*);
+      void doWriteRun(RunPrincipal const& rp, ModuleCallingContext const*, MergeableRunProductMetadata const*);
       void doWriteLuminosityBlock(LuminosityBlockPrincipal const& lbp, ModuleCallingContext const*);
       void doOpenFile(FileBlock const& fb);
       void doRespondToOpenInputFile(FileBlock const& fb);
@@ -212,10 +217,6 @@ namespace edm {
                                          ThinnedAssociationsHelper&) { }
 
       std::string workerType() const {return "WorkerT<edm::one::OutputModuleBase>";}
-      
-      SharedResourcesAcquirer& sharedResourcesAcquirer() {
-        return resourcesAcquirer_;
-      }
       
       /// Tell the OutputModule that is must end the current file.
       void doCloseFile();
@@ -250,6 +251,8 @@ namespace edm {
       virtual void doEndLuminosityBlock_(LuminosityBlockForOutput const&){}
       virtual void doRespondToOpenInputFile_(FileBlock const&) {}
       virtual void doRespondToCloseInputFile_(FileBlock const&) {}
+
+      virtual void setProcessesWithSelectedMergeableRunProducts(std::set<std::string> const&) {}
 
       bool hasAcquire() const { return false; }
       bool hasAccumulator() const { return false; }

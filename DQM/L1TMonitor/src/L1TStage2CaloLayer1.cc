@@ -8,6 +8,7 @@
 #include "DQM/L1TMonitor/interface/L1TStage2CaloLayer1.h"
 
 #include "FWCore/Framework/interface/ESHandle.h"
+#include "FWCore/Framework/interface/LuminosityBlock.h"
 #include "DataFormats/Provenance/interface/EventAuxiliary.h"
 
 #include "CondFormats/RunInfo/interface/RunInfo.h"
@@ -28,7 +29,7 @@ L1TStage2CaloLayer1::L1TStage2CaloLayer1(const edm::ParameterSet & ps) :
   fedRawData_(consumes<FEDRawDataCollection>(ps.getParameter<edm::InputTag>("fedRawDataLabel"))),
   histFolder_(ps.getParameter<std::string>("histFolder")),
   tpFillThreshold_(ps.getUntrackedParameter<int>("etDistributionsFillThreshold", 0)),
-  ignoreHFfb2_(ps.getUntrackedParameter<bool>("ignoreHFfb2", false))
+  ignoreHFfbs_(ps.getUntrackedParameter<bool>("ignoreHFfbs", false))
 {
   ecalTPSentRecd_.reserve(28*2*72);
   hcalTPSentRecd_.reserve(41*2*72);
@@ -79,8 +80,6 @@ void L1TStage2CaloLayer1::analyze(const edm::Event & event, const edm::EventSetu
 
   edm::Handle<EcalTrigPrimDigiCollection> ecalTPsSent;
   event.getByToken(ecalTPSourceSent_, ecalTPsSent);
-  // either ECAL is out of run or some problem
-  bool tccFullReadout = ( ecalTPsSent->size() == 28*72*2 );
   edm::Handle<EcalTrigPrimDigiCollection> ecalTPsRecd;
   event.getByToken(ecalTPSourceRecd_, ecalTPsRecd);
 
@@ -95,11 +94,10 @@ void L1TStage2CaloLayer1::analyze(const edm::Event & event, const edm::EventSetu
 
   for ( const auto& tpPair : ecalTPSentRecd_ ) {
     auto sentTp = tpPair.first;
-    if ( sentTp.compressedEt() < 0 && !tccFullReadout ) {
-      // This means there was some sort of issue with TCC unpacking for this particular event
-      updateMismatch(event, 4);
-      // But we don't want to compare to a tp set to -1
-      EcalTriggerPrimitiveSample sample(0); 
+    if ( sentTp.compressedEt() < 0 ) {
+      // ECal zero-suppresses digis, and a default-constructed
+      // digi has et=-1 apparently, but we know it should be zero
+      EcalTriggerPrimitiveSample sample(0);
       EcalTriggerPrimitiveDigi tpg(sentTp.id());
       tpg.setSize(1);
       tpg.setSample(0, sample);
@@ -270,8 +268,9 @@ void L1TStage2CaloLayer1::analyze(const edm::Event & event, const edm::EventSetu
     }
 
     const bool HetAgreement = sentTp.SOI_compressedEt() == recdTp.SOI_compressedEt();
-    const bool Hfb1Agreement = sentTp.SOI_fineGrain() == recdTp.SOI_fineGrain();
-    const bool Hfb2Agreement = ( abs(ieta) < 29 ) ? true : ((sentTp.SOI_fineGrain(1) == recdTp.SOI_fineGrain(1)) || ignoreHFfb2_);
+    const bool Hfb1Agreement = ( abs(ieta) < 29 ) ? true : (recdTp.SOI_compressedEt()==0 || (sentTp.SOI_fineGrain() == recdTp.SOI_fineGrain()) || ignoreHFfbs_);
+    // Ignore minBias (FB2) bit if we receieve 0 ET, which means it is likely zero-suppressed on HCal readout side
+    const bool Hfb2Agreement = ( abs(ieta) < 29 ) ? true : (recdTp.SOI_compressedEt()==0 || (sentTp.SOI_fineGrain(1) == recdTp.SOI_fineGrain(1)) || ignoreHFfbs_);
     if ( HetAgreement && Hfb1Agreement && Hfb2Agreement ) {
       // Full match
       if ( sentTp.SOI_compressedEt() > tpFillThreshold_ ) {
@@ -470,7 +469,7 @@ void L1TStage2CaloLayer1::bookHistograms(DQMStore::IBooker &ibooker, const edm::
 
   ibooker.setCurrentFolder(histFolder_+"/MismatchDetail");
 
-  const int nMismatchTypes = 5;
+  const int nMismatchTypes = 4;
   last20Mismatches_ = ibooker.book2D("last20Mismatches", 
                                              "Log of last 20 mismatches (use json tool to copy/paste)",
                                              nMismatchTypes, 0, nMismatchTypes, 20, 0, 20);
@@ -478,7 +477,6 @@ void L1TStage2CaloLayer1::bookHistograms(DQMStore::IBooker &ibooker, const edm::
   last20Mismatches_->getTH2F()->GetXaxis()->SetBinLabel(2, "Ecal TP Fine Grain Bit Mismatch");
   last20Mismatches_->getTH2F()->GetXaxis()->SetBinLabel(3, "Hcal TP Et Mismatch");
   last20Mismatches_->getTH2F()->GetXaxis()->SetBinLabel(4, "Hcal TP Feature Bit Mismatch");
-  last20Mismatches_->getTH2F()->GetXaxis()->SetBinLabel(5, "TCC Unpacker Error");
   for (size_t i=0; i<20; ++i) last20MismatchArray_.at(i) = {"-", 0};
   for (size_t i=1; i<=20; ++i) last20Mismatches_->getTH2F()->GetYaxis()->SetBinLabel(i, "-");
 

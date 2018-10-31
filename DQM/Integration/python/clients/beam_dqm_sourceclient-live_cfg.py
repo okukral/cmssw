@@ -1,7 +1,8 @@
+from __future__ import print_function
 import FWCore.ParameterSet.Config as cms
 from Configuration.StandardSequences.Eras import eras
 
-process = cms.Process("BeamMonitor", eras.Run2_2017)
+process = cms.Process("BeamMonitor", eras.Run2_2018)
 
 #----------------------------------------------                                                                                                                                    
 # Switch to change between firstStep and Pixel
@@ -69,6 +70,7 @@ process.load("RecoLocalTracker.SiPixelRecHits.PixelCPEGeneric_cfi")
 # Condition for P5 cluster
 process.load("DQM.Integration.config.FrontierCondition_GT_cfi")
 # Condition for lxplus: change and possibly customise the GT
+#process.load('Configuration.StandardSequences.FrontierConditions_GlobalTag_cff')
 #from Configuration.AlCa.GlobalTag import GlobalTag as gtCustomise
 #process.GlobalTag = gtCustomise(process.GlobalTag, 'auto:run2_data', '')
 
@@ -131,7 +133,6 @@ process.pixelTracksCutClassifier = cms.EDProducer( "TrackCutClassifier",
       minLayers = cms.vint32( 0, 2, 3 )
     ),
     ignoreVertices = cms.bool( True ),
-    GBRForestFileName = cms.string( "" )
 )
 process.pixelTracksHP = cms.EDProducer( "TrackCollectionFilterCloner",
     minQuality = cms.string( "highPurity" ),
@@ -262,7 +263,7 @@ if (process.runType.getRunType() == process.runType.pp_run or process.runType.ge
     process.runType.getRunType() == process.runType.cosmic_run or process.runType.getRunType() == process.runType.cosmic_run_stage1 or 
     process.runType.getRunType() == process.runType.hpu_run):
 
-    print "[beam_dqm_sourceclient-live_cfg]:: Running pp"
+    print("[beam_dqm_sourceclient-live_cfg]:: Running pp")
 
     process.castorDigis.InputLabel = cms.InputTag("rawDataCollector")
     process.csctfDigis.producer = cms.InputTag("rawDataCollector")
@@ -290,7 +291,7 @@ if (process.runType.getRunType() == process.runType.pp_run or process.runType.ge
   
 
     if (runFirstStepTrk): # for first Step Tracking
-        print "[beam_dqm_sourceclient-live_cfg]:: firstStepTracking"
+        print("[beam_dqm_sourceclient-live_cfg]:: firstStepTracking")
         # Import TrackerLocalReco sequence
         process.load('RecoLocalTracker.Configuration.RecoLocalTracker_cff')
         # Import MeasurementTrackerEvents used during patter recognition
@@ -331,7 +332,7 @@ if (process.runType.getRunType() == process.runType.pp_run or process.runType.ge
                                                      process.InitialStepPreSplitting
                                                      )
     else: # pixel tracking
-        print "[beam_dqm_sourceclient-live_cfg]:: pixelTracking"
+        print("[beam_dqm_sourceclient-live_cfg]:: pixelTracking")
 
 
         #pixel  track/vertices reco
@@ -363,11 +364,25 @@ if (process.runType.getRunType() == process.runType.pp_run or process.runType.ge
                                                                "HLT_QuadJet")
 
     process.dqmBeamMonitor.hltResults = cms.InputTag("TriggerResults","","HLT")
+ 
+    # Select events based on the pixel cluster multiplicity
+    import  HLTrigger.special.hltPixelActivityFilter_cfi
+    process.multFilter = HLTrigger.special.hltPixelActivityFilter_cfi.hltPixelActivityFilter.clone(
+       inputTag  = cms.InputTag('siPixelClustersPreSplitting'),
+       minClusters = cms.uint32(10000),
+       maxClusters = cms.uint32(50000)
+    )
 
+    process.filter_step = cms.Sequence( process.siPixelDigis
+                                       *process.siPixelClustersPreSplitting
+                                       *process.multFilter
+                                  )
 
     process.p = cms.Path(process.scalersRawToDigi
                          *process.dqmTKStatus
                          *process.hltTriggerTypeFilter
+                         # The following filter was used during 2018 high pile up (HPU) run.
+                         #*process.filter_step
                          *process.dqmcommon
                          *process.tracking_FirstStep
                          *process.monitor
@@ -382,7 +397,7 @@ if (process.runType.getRunType() == process.runType.pp_run or process.runType.ge
 #--------------------------------------------------
 if (process.runType.getRunType() == process.runType.hi_run):
 
-    print "beam_dqm_sourceclient-live_cfg:Running HI"
+    print("beam_dqm_sourceclient-live_cfg:Running HI")
     process.castorDigis.InputLabel = cms.InputTag("rawDataRepacker")
     process.csctfDigis.producer = cms.InputTag("rawDataRepacker")
     process.dttfDigis.DTTF_FED_Source = cms.InputTag("rawDataRepacker")

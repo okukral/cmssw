@@ -22,7 +22,8 @@ probeToL1Offset = 10
 photonEfficiencyThresholds = electronEfficiencyThresholds
 photonEfficiencyBins = electronEfficiencyBins
 
-l1tEGammaOfflineDQM = cms.EDAnalyzer(
+from DQMServices.Core.DQMEDAnalyzer import DQMEDAnalyzer
+l1tEGammaOfflineDQM = DQMEDAnalyzer(
     "L1TEGammaOffline",
     electronCollection=cms.InputTag("gedGsfElectrons"),
     photonCollection=cms.InputTag("photons"),
@@ -41,7 +42,7 @@ l1tEGammaOfflineDQM = cms.EDAnalyzer(
 
     stage2CaloLayer2EGammaSource=cms.InputTag("caloStage2Digis", "EGamma"),
 
-    histFolder=cms.string('L1T/L1TEGamma'),
+    histFolder=cms.string('L1T/L1TObjects/L1TEGamma/L1TriggerVsReco'),
 
     electronEfficiencyThresholds=cms.vdouble(electronEfficiencyThresholds),
     electronEfficiencyBins=cms.vdouble(electronEfficiencyBins),
@@ -50,6 +51,9 @@ l1tEGammaOfflineDQM = cms.EDAnalyzer(
 
     photonEfficiencyThresholds=cms.vdouble(photonEfficiencyThresholds),
     photonEfficiencyBins=cms.vdouble(photonEfficiencyBins),
+    maxDeltaRForL1Matching=cms.double(0.3),
+    maxDeltaRForHLTMatching=cms.double(0.3),
+    recoToL1TThresholdFactor=cms.double(1.25),
 
     histDefinitions=cms.PSet(
         nVertex=histDefinitions.nVertex.clone(),
@@ -89,5 +93,5 @@ ppRef_2017.toModify(
 l1tEGammaOfflineDQMEmu = l1tEGammaOfflineDQM.clone(
     stage2CaloLayer2EGammaSource=cms.InputTag("simCaloStage2Digis"),
 
-    histFolder=cms.string('L1TEMU/L1TEGamma'),
+    histFolder=cms.string('L1TEMU/L1TObjects/L1TEGamma/L1TriggerVsReco'),
 )

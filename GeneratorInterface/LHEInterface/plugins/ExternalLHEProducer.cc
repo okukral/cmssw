@@ -58,7 +58,6 @@ Implementation:
 
 #include "FWCore/ServiceRegistry/interface/Service.h"
 #include "FWCore/Utilities/interface/RandomNumberGenerator.h"
-#include "FWCore/Utilities/interface/TimingServiceBase.h"
 
 #include "FWCore/MessageLogger/interface/MessageLogger.h"
 
@@ -93,6 +92,7 @@ private:
   std::vector<std::string> args_;
   uint32_t npars_;
   uint32_t nEvents_;
+  bool storeXML_;
   unsigned int nThreads_{1};
   std::string outputContents_;
 
@@ -133,7 +133,8 @@ ExternalLHEProducer::ExternalLHEProducer(const edm::ParameterSet& iConfig) :
   outputFile_(iConfig.getParameter<std::string>("outputFile")),
   args_(iConfig.getParameter<std::vector<std::string> >("args")),
   npars_(iConfig.getParameter<uint32_t>("numberOfParameters")),
-  nEvents_(iConfig.getUntrackedParameter<uint32_t>("nEvents"))
+  nEvents_(iConfig.getUntrackedParameter<uint32_t>("nEvents")),
+  storeXML_(iConfig.getUntrackedParameter<bool>("storeXML"))
 {
   if (npars_ != args_.size())
     throw cms::Exception("ExternalLHEProducer") << "Problem with configuration: " << args_.size() << " script arguments given, expected " << npars_;
@@ -194,7 +195,7 @@ ExternalLHEProducer::produce(edm::Event& iEvent, const edm::EventSetup& iSetup)
   iEvent.put(std::move(product));
 
   if (runInfo) {
-    std::auto_ptr<LHERunInfoProduct> product(new LHERunInfoProduct(*runInfo->getHEPRUP()));
+    std::unique_ptr<LHERunInfoProduct> product(new LHERunInfoProduct(*runInfo->getHEPRUP()));
     std::for_each(runInfo->getHeaders().begin(),
                   runInfo->getHeaders().end(),
                   boost::bind(&LHERunInfoProduct::addHeader,
@@ -208,7 +209,7 @@ ExternalLHEProducer::produce(edm::Event& iEvent, const edm::EventSetup& iSetup)
       runInfoProducts.front().mergeProduct(*product);
       if (!wasMerged) {
         runInfoProducts.pop_front();
-        runInfoProducts.push_front(product);
+        runInfoProducts.push_front(product.release());
         wasMerged = true;
       }
     }
@@ -258,15 +259,19 @@ ExternalLHEProducer::beginRunProduce(edm::Run& run, edm::EventSetup const& es)
   
   //fill LHEXMLProduct (streaming read directly into compressed buffer to save memory)
   std::unique_ptr<LHEXMLStringProduct> p(new LHEXMLStringProduct);
-  std::ifstream instream(outputFile_);
-  if (!instream) {
-    throw cms::Exception("OutputOpenError") << "Unable to open script output file " << outputFile_ << ".";
-  }  
-  instream.seekg (0, instream.end);
-  int insize = instream.tellg();
-  instream.seekg (0, instream.beg);  
-  p->fillCompressedContent(instream, 0.25*insize);
-  instream.close();
+
+  //store the XML file only if explictly requested
+  if (storeXML_) {
+    std::ifstream instream(outputFile_);
+    if (!instream) {
+      throw cms::Exception("OutputOpenError") << "Unable to open script output file " << outputFile_ << ".";
+    }  
+    instream.seekg (0, instream.end);
+    int insize = instream.tellg();
+    instream.seekg (0, instream.beg);  
+    p->fillCompressedContent(instream, 0.25*insize);
+    instream.close();
+  }
   run.put(std::move(p), "LHEScriptOutput");
 
   // LHE C++ classes translation
@@ -444,13 +449,6 @@ ExternalLHEProducer::executeScript()
       break;
     }
   } while (true);
-  edm::Service<edm::TimingServiceBase> ts;
-  if(ts.isAvailable()) {
-    struct rusage ru;
-    getrusage(RUSAGE_CHILDREN,&ru);
-    double time = static_cast<double>(ru.ru_stime.tv_sec) + (static_cast<double>(ru.ru_stime.tv_usec) * 1E-6);
-    ts->addToCPUTime(time);
-  }
   if (rc) {
     throw cms::Exception("ExternalLHEProducer") << "Child failed with exit code " << rc << ".";
   }
@@ -499,6 +497,7 @@ ExternalLHEProducer::fillDescriptions(edm::ConfigurationDescriptions& descriptio
   desc.add<std::vector<std::string> >("args");
   desc.add<uint32_t>("numberOfParameters");
   desc.addUntracked<uint32_t>("nEvents");
+  desc.addUntracked<bool>("storeXML", false);
 
   descriptions.addDefault(desc);
 }

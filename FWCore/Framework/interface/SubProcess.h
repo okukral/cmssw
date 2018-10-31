@@ -30,6 +30,7 @@ namespace edm {
   class BranchIDListHelper;
   class HistoryAppender;
   class IOVSyncValue;
+  class MergeableRunProductMetadata;
   class ParameterSet;
   class ProductRegistry;
   class PreallocationConfiguration;
@@ -109,12 +110,12 @@ namespace edm {
 
 
     // Write the luminosity block
-    void writeLumi(LuminosityBlockPrincipal&);
+    void writeLumiAsync(WaitingTaskHolder, LuminosityBlockPrincipal&);
 
     void deleteLumiFromCache(LuminosityBlockPrincipal&);
 
     // Write the run
-    void writeRun(ProcessHistoryID const& parentPhID, int runNumber);
+    void writeRunAsync(WaitingTaskHolder, ProcessHistoryID const& parentPhID, int runNumber, MergeableRunProductMetadata const*);
 
     void deleteRunFromCache(ProcessHistoryID const& parentPhID, int runNumber);
 

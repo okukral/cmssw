@@ -235,7 +235,7 @@ bool FEDErrors::fillFatalFEDErrors(const FEDRawData& aFedData,
 				   const unsigned int aPrintDebug)
 {
 
-  std::auto_ptr<const sistrip::FEDBufferBase> bufferBase;
+  std::unique_ptr<const sistrip::FEDBufferBase> bufferBase;
   try {
     bufferBase.reset(new sistrip::FEDBufferBase(aFedData.data(),aFedData.size()));
   } catch (const cms::Exception& e) {
@@ -322,7 +322,7 @@ float FEDErrors::fillNonFatalFEDErrors(const sistrip::FEDBuffer* aBuffer,
 
     if (!lIsConnected) continue;
     lTotChans++;
-    if (!aBuffer->channelGood(iCh)) lBadChans++;
+    if (!aBuffer->channelGood(iCh, true)) lBadChans++;
   }
 
   return static_cast<float>(lBadChans*1.0/lTotChans);
@@ -347,7 +347,7 @@ bool FEDErrors::fillFEDErrors(const FEDRawData& aFedData,
   if (!fillFatalFEDErrors(aFedData,aPrintDebug)) return false;
 
   //need to construct full object to go any further
-  std::auto_ptr<const sistrip::FEDBuffer> buffer;
+  std::unique_ptr<const sistrip::FEDBuffer> buffer;
   buffer.reset(new sistrip::FEDBuffer(aFedData.data(),aFedData.size(),true));
 
   //fill remaining unpackerFEDcheck
@@ -589,7 +589,7 @@ bool FEDErrors::fillChannelErrors(const sistrip::FEDBuffer* aBuffer,
 
   for (unsigned int iCh = 0; iCh < sistrip::FEDCH_PER_FED; iCh++) {//loop on channels
 
-    bool lFailUnpackerChannelCheck = (!aBuffer->channelGood(iCh) && connected_[iCh]) || failUnpackerFEDCheck_;
+    bool lFailUnpackerChannelCheck = (!aBuffer->channelGood(iCh, true) && connected_[iCh]) || failUnpackerFEDCheck_;
     bool lFailMonitoringChannelCheck = !lPassedMonitoringFEDcheck && connected_[iCh];
 
 

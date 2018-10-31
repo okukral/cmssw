@@ -65,6 +65,7 @@ namespace {
     return nvtxDomainRangePushEx(domain, &eventAttrib);
   }
 
+  __attribute__((unused))
   nvtxRangeId_t nvtxDomainRangeStart(nvtxDomainHandle_t domain, const char* message) {
     nvtxEventAttributes_t eventAttrib = { 0 };
     eventAttrib.version         = NVTX_VERSION;
@@ -109,10 +110,12 @@ namespace {
   enum {
     nvtxBlack       = 0x00000000,
     nvtxRed         = 0x00ff0000,
-    nvtxDarkGreen   = 0x0000c000,
+    nvtxDarkGreen   = 0x00009900,
     nvtxGreen       = 0x0000ff00,
+    nvtxLightGreen  = 0x00ccffcc,
     nvtxBlue        = 0x000000ff,
     nvtxAmber       = 0x00ffbf00,
+    nvtxLightAmber  = 0x00fff2cc,
     nvtxWhite       = 0x00ffffff
   };
 }
@@ -254,6 +257,10 @@ public:
   void postModuleStreamEndLumi(edm::StreamContext const&, edm::ModuleCallingContext const&);
 
   // these signal pair are guaranteed to be called by the same thread
+  void preModuleEventAcquire(edm::StreamContext const&, edm::ModuleCallingContext const&);
+  void postModuleEventAcquire(edm::StreamContext const&, edm::ModuleCallingContext const&);
+
+  // these signal pair are guaranteed to be called by the same thread
   void preModuleEvent(edm::StreamContext const&, edm::ModuleCallingContext const&);
   void postModuleEvent(edm::StreamContext const&, edm::ModuleCallingContext const&);
 
@@ -269,6 +276,7 @@ private:
   bool highlight(std::string const&);
 
   std::vector<std::string> highlightModules_;
+  bool                     showModulePrefetching_;
 
   unsigned int concurrentStreams_;
   std::vector<nvtxRangeId_t>              event_;               // per-stream event ranges
@@ -318,6 +326,7 @@ private:
 
 NVProfilerService::NVProfilerService(edm::ParameterSet const & config, edm::ActivityRegistry & registry) :
   highlightModules_(config.getUntrackedParameter<std::vector<std::string>>("highlightModules")),
+  showModulePrefetching_(config.getUntrackedParameter<bool>("showModulePrefetching")),
   concurrentStreams_(0),
   domains_(this)
 {
@@ -456,6 +465,10 @@ NVProfilerService::NVProfilerService(edm::ParameterSet const & config, edm::Acti
   registry.watchPostModuleStreamEndLumi(this, &NVProfilerService::postModuleStreamEndLumi);
 
   // these signal pair are guaranteed to be called by the same thread
+  registry.watchPreModuleEventAcquire(this, &NVProfilerService::preModuleEventAcquire);
+  registry.watchPostModuleEventAcquire(this, &NVProfilerService::postModuleEventAcquire);
+
+  // these signal pair are guaranteed to be called by the same thread
   registry.watchPreModuleEvent(this, &NVProfilerService::preModuleEvent);
   registry.watchPostModuleEvent(this, &NVProfilerService::postModuleEvent);
 
@@ -481,9 +494,13 @@ void
 NVProfilerService::fillDescriptions(edm::ConfigurationDescriptions & descriptions) {
   edm::ParameterSetDescription desc;
   desc.addUntracked<std::vector<std::string>>("highlightModules", {})->setComment("");
-  desc.addUntracked<bool>("showDelayedModules", true)->setComment("");
+  desc.addUntracked<bool>("showModulePrefetching", false)->setComment("Show the stack of dependencies that requested to run a module.");
   descriptions.add("NVProfilerService", desc);
-  descriptions.setComment("This Service provides CMSSW-aware annotations to nvprof/nvvm.");
+  descriptions.setComment(R"(This Service provides CMSSW-aware annotations to nvprof/nvvm.
+
+Notes:
+  - the option '--cpu-profiling on' currently results in cmsRun being stuck at the beginning of the job.
+  - the option '--cpu-thread-tracing on' is not compatible with jemalloc, and should only be used with cmsRunGlibC.)");
 }
 
 void
@@ -584,7 +601,7 @@ NVProfilerService::preModuleBeginStream(edm::StreamContext const& sc, edm::Modul
   if (highlight(label))
     stream_modules_[sid][mid] = nvtxDomainRangeStartColor(stream_domain(sid), msg.c_str(), nvtxAmber);
   else
-    stream_modules_[sid][mid] = nvtxDomainRangeStart(stream_domain(sid), msg.c_str());
+    stream_modules_[sid][mid] = nvtxDomainRangeStartColor(stream_domain(sid), msg.c_str(), nvtxGreen);;
 }
 
 void
@@ -603,7 +620,7 @@ NVProfilerService::preModuleEndStream(edm::StreamContext const& sc, edm::ModuleC
   if (highlight(label))
     stream_modules_[sid][mid] = nvtxDomainRangeStartColor(stream_domain(sid), msg.c_str(), nvtxAmber);
   else
-    stream_modules_[sid][mid] = nvtxDomainRangeStart(stream_domain(sid), msg.c_str());
+    stream_modules_[sid][mid] = nvtxDomainRangeStartColor(stream_domain(sid), msg.c_str(), nvtxGreen);;
 }
 
 void
@@ -727,21 +744,25 @@ NVProfilerService::postPathEvent(edm::StreamContext const& sc, edm::PathContext 
 
 void
 NVProfilerService::preModuleEventPrefetching(edm::StreamContext const& sc, edm::ModuleCallingContext const& mcc) {
-  auto sid = sc.streamID();
-  auto mid = mcc.moduleDescription()->id();
-  auto const & label = mcc.moduleDescription()->moduleLabel();
-  auto const & msg = label + " prefetching";
-  if (highlight(label))
-    stream_modules_[sid][mid] = nvtxDomainRangeStartColor(stream_domain(sid), label.c_str(), nvtxAmber);
-  else
-    stream_modules_[sid][mid] = nvtxDomainRangeStart(stream_domain(sid), label.c_str());
+  if (showModulePrefetching_) {
+    auto sid = sc.streamID();
+    auto mid = mcc.moduleDescription()->id();
+    auto const & label = mcc.moduleDescription()->moduleLabel();
+    auto const & msg = label + " prefetching";
+    if (highlight(label))
+      stream_modules_[sid][mid] = nvtxDomainRangeStartColor(stream_domain(sid), msg.c_str(), nvtxLightAmber);
+    else
+      stream_modules_[sid][mid] = nvtxDomainRangeStartColor(stream_domain(sid), msg.c_str(), nvtxLightGreen);
+  }
 }
 
 void
 NVProfilerService::postModuleEventPrefetching(edm::StreamContext const& sc, edm::ModuleCallingContext const& mcc) {
-  auto sid = sc.streamID();
-  auto mid = mcc.moduleDescription()->id();
-  nvtxDomainRangeEnd(stream_domain(sid), stream_modules_[sid][mid]);
+  if (showModulePrefetching_) {
+    auto sid = sc.streamID();
+    auto mid = mcc.moduleDescription()->id();
+    nvtxDomainRangeEnd(stream_domain(sid), stream_modules_[sid][mid]);
+  }
 }
 
 void
@@ -753,7 +774,7 @@ NVProfilerService::preModuleConstruction(edm::ModuleDescription const& desc) {
   if (highlight(label))
     global_modules_[mid] = nvtxDomainRangeStartColor(global_domain(), msg.c_str(), nvtxAmber);
   else
-    global_modules_[mid] = nvtxDomainRangeStart(global_domain(), msg.c_str());
+    global_modules_[mid] = nvtxDomainRangeStartColor(global_domain(), msg.c_str(), nvtxGreen);;
 }
 
 void
@@ -770,7 +791,7 @@ NVProfilerService::preModuleBeginJob(edm::ModuleDescription const& desc) {
   if (highlight(label))
     global_modules_[mid] = nvtxDomainRangeStartColor(global_domain(), msg.c_str(), nvtxAmber);
   else
-    global_modules_[mid] = nvtxDomainRangeStart(global_domain(), msg.c_str());
+    global_modules_[mid] = nvtxDomainRangeStartColor(global_domain(), msg.c_str(), nvtxGreen);;
 }
 
 void
@@ -787,13 +808,32 @@ NVProfilerService::preModuleEndJob(edm::ModuleDescription const& desc) {
   if (highlight(label))
     global_modules_[mid] = nvtxDomainRangeStartColor(global_domain(), msg.c_str(), nvtxAmber);
   else
-    global_modules_[mid] = nvtxDomainRangeStart(global_domain(), msg.c_str());
+    global_modules_[mid] = nvtxDomainRangeStartColor(global_domain(), msg.c_str(), nvtxGreen);;
 }
 
 void
 NVProfilerService::postModuleEndJob(edm::ModuleDescription const& desc) {
   auto mid = desc.id();
   nvtxDomainRangeEnd(global_domain(), global_modules_[mid]);
+}
+
+void
+NVProfilerService::preModuleEventAcquire(edm::StreamContext const& sc, edm::ModuleCallingContext const& mcc) {
+  auto sid = sc.streamID();
+  auto mid = mcc.moduleDescription()->id();
+  auto const & label = mcc.moduleDescription()->moduleLabel();
+  auto const & msg = label + " acquire";
+  if (highlight(label))
+    stream_modules_[sid][mid] = nvtxDomainRangeStartColor(stream_domain(sid), msg.c_str(), nvtxAmber);
+  else
+    stream_modules_[sid][mid] = nvtxDomainRangeStartColor(stream_domain(sid), msg.c_str(), nvtxGreen);;
+}
+
+void
+NVProfilerService::postModuleEventAcquire(edm::StreamContext const& sc, edm::ModuleCallingContext const& mcc) {
+  auto sid = sc.streamID();
+  auto mid = mcc.moduleDescription()->id();
+  nvtxDomainRangeEnd(stream_domain(sid), stream_modules_[sid][mid]);
 }
 
 void
@@ -804,7 +844,7 @@ NVProfilerService::preModuleEvent(edm::StreamContext const& sc, edm::ModuleCalli
   if (highlight(label))
     stream_modules_[sid][mid] = nvtxDomainRangeStartColor(stream_domain(sid), label.c_str(), nvtxAmber);
   else
-    stream_modules_[sid][mid] = nvtxDomainRangeStart(stream_domain(sid), label.c_str());
+    stream_modules_[sid][mid] = nvtxDomainRangeStartColor(stream_domain(sid), label.c_str(), nvtxGreen);;
 }
 
 void
@@ -824,7 +864,7 @@ NVProfilerService::preModuleEventDelayedGet(edm::StreamContext const& sc, edm::M
   if (highlight(label))
     stream_modules_[sid][mid] = nvtxDomainRangeStartColor(stream_domain(sid), label.c_str(), nvtxAmber);
   else
-    stream_modules_[sid][mid] = nvtxDomainRangeStart(stream_domain(sid), label.c_str());
+    stream_modules_[sid][mid] = nvtxDomainRangeStartColor(stream_domain(sid), label.c_str(), nvtxGreen);;
   */
 }
 
@@ -847,7 +887,7 @@ NVProfilerService::preEventReadFromSource(edm::StreamContext const& sc, edm::Mod
   if (highlight(label))
     stream_modules_[sid][mid] = nvtxDomainRangeStartColor(stream_domain(sid), msg.c_str(), nvtxAmber);
   else
-    stream_modules_[sid][mid] = nvtxDomainRangeStart(stream_domain(sid), msg.c_str());
+    stream_modules_[sid][mid] = nvtxDomainRangeStartColor(stream_domain(sid), msg.c_str(), nvtxGreen);;
   */
 }
 
@@ -869,7 +909,7 @@ NVProfilerService::preModuleStreamBeginRun(edm::StreamContext const& sc, edm::Mo
   if (highlight(label))
     stream_modules_[sid][mid] = nvtxDomainRangeStartColor(stream_domain(sid), msg.c_str(), nvtxAmber);
   else
-    stream_modules_[sid][mid] = nvtxDomainRangeStart(stream_domain(sid), msg.c_str());
+    stream_modules_[sid][mid] = nvtxDomainRangeStartColor(stream_domain(sid), msg.c_str(), nvtxGreen);;
 }
 
 void
@@ -888,7 +928,7 @@ NVProfilerService::preModuleStreamEndRun(edm::StreamContext const& sc, edm::Modu
   if (highlight(label))
     stream_modules_[sid][mid] = nvtxDomainRangeStartColor(stream_domain(sid), msg.c_str(), nvtxAmber);
   else
-    stream_modules_[sid][mid] = nvtxDomainRangeStart(stream_domain(sid), msg.c_str());
+    stream_modules_[sid][mid] = nvtxDomainRangeStartColor(stream_domain(sid), msg.c_str(), nvtxGreen);;
 }
 
 void
@@ -907,7 +947,7 @@ NVProfilerService::preModuleStreamBeginLumi(edm::StreamContext const& sc, edm::M
   if (highlight(label))
     stream_modules_[sid][mid] = nvtxDomainRangeStartColor(stream_domain(sid), msg.c_str(), nvtxAmber);
   else
-    stream_modules_[sid][mid] = nvtxDomainRangeStart(stream_domain(sid), msg.c_str());
+    stream_modules_[sid][mid] = nvtxDomainRangeStartColor(stream_domain(sid), msg.c_str(), nvtxGreen);;
 }
 
 void
@@ -926,7 +966,7 @@ NVProfilerService::preModuleStreamEndLumi(edm::StreamContext const& sc, edm::Mod
   if (highlight(label))
     stream_modules_[sid][mid] = nvtxDomainRangeStartColor(stream_domain(sid), msg.c_str(), nvtxAmber);
   else
-    stream_modules_[sid][mid] = nvtxDomainRangeStart(stream_domain(sid), msg.c_str());
+    stream_modules_[sid][mid] = nvtxDomainRangeStartColor(stream_domain(sid), msg.c_str(), nvtxGreen);;
 }
 
 void
@@ -944,7 +984,7 @@ NVProfilerService::preModuleGlobalBeginRun(edm::GlobalContext const& gc, edm::Mo
   if (highlight(label))
     global_modules_[mid] = nvtxDomainRangeStartColor(global_domain(), msg.c_str(), nvtxAmber);
   else
-    global_modules_[mid] = nvtxDomainRangeStart(global_domain(), msg.c_str());
+    global_modules_[mid] = nvtxDomainRangeStartColor(global_domain(), msg.c_str(), nvtxGreen);;
 }
 
 void
@@ -961,7 +1001,7 @@ NVProfilerService::preModuleGlobalEndRun(edm::GlobalContext const& gc, edm::Modu
   if (highlight(label))
     global_modules_[mid] = nvtxDomainRangeStartColor(global_domain(), msg.c_str(), nvtxAmber);
   else
-    global_modules_[mid] = nvtxDomainRangeStart(global_domain(), msg.c_str());
+    global_modules_[mid] = nvtxDomainRangeStartColor(global_domain(), msg.c_str(), nvtxGreen);;
 }
 
 void
@@ -978,7 +1018,7 @@ NVProfilerService::preModuleGlobalBeginLumi(edm::GlobalContext const& gc, edm::M
   if (highlight(label))
     global_modules_[mid] = nvtxDomainRangeStartColor(global_domain(), msg.c_str(), nvtxAmber);
   else
-    global_modules_[mid] = nvtxDomainRangeStart(global_domain(), msg.c_str());
+    global_modules_[mid] = nvtxDomainRangeStartColor(global_domain(), msg.c_str(), nvtxGreen);;
 }
 
 void
@@ -995,7 +1035,7 @@ NVProfilerService::preModuleGlobalEndLumi(edm::GlobalContext const& gc, edm::Mod
   if (highlight(label))
     global_modules_[mid] = nvtxDomainRangeStartColor(global_domain(), msg.c_str(), nvtxAmber);
   else
-    global_modules_[mid] = nvtxDomainRangeStart(global_domain(), msg.c_str());
+    global_modules_[mid] = nvtxDomainRangeStartColor(global_domain(), msg.c_str(), nvtxGreen);;
 }
 
 void
@@ -1013,7 +1053,7 @@ NVProfilerService::preSourceConstruction(edm::ModuleDescription const& desc) {
   if (highlight(label))
     global_modules_[mid] = nvtxDomainRangeStartColor(global_domain(), msg.c_str(), nvtxAmber);
   else
-    global_modules_[mid] = nvtxDomainRangeStart(global_domain(), msg.c_str());
+    global_modules_[mid] = nvtxDomainRangeStartColor(global_domain(), msg.c_str(), nvtxGreen);;
 }
 
 void

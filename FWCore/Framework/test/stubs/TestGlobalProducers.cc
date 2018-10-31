@@ -23,8 +23,7 @@ for testing purposes only.
 #include "FWCore/Framework/interface/MakerMacros.h"
 #include "FWCore/ParameterSet/interface/ParameterSet.h"
 #include "FWCore/Utilities/interface/EDMException.h"
-
-
+#include "DataFormats/Provenance/interface/BranchDescription.h"
 
 namespace edmtest {
 namespace global {
@@ -59,7 +58,9 @@ struct Dummy {
     explicit StreamIntProducer(edm::ParameterSet const& p) :
 	trans_(p.getParameter<int>("transitions")) 
     {
-    produces<unsigned int>();
+      callWhenNewProductsRegistered([](edm::BranchDescription const& desc)
+        { std::cout << "global::StreamIntProducer " << desc.moduleLabel() << std::endl; });
+      produces<unsigned int>();
     }
 
     const unsigned int trans_; 
@@ -417,6 +418,7 @@ struct Dummy {
     explicit TestBeginRunProducer(edm::ParameterSet const& p) :
 	trans_(p.getParameter<int>("transitions")) {	
     produces<unsigned int>();
+    produces<unsigned int, edm::Transition::BeginRun>("a");
     }
 
     const unsigned int trans_; 
@@ -457,6 +459,7 @@ struct Dummy {
     explicit TestEndRunProducer(edm::ParameterSet const& p) :
 	trans_(p.getParameter<int>("transitions")) {	
     produces<unsigned int>();
+    produces<unsigned int, edm::Transition::EndRun>("a");
     }
     const unsigned int trans_;
     mutable std::atomic<unsigned int> m_count{0};
@@ -496,6 +499,7 @@ struct Dummy {
     explicit TestBeginLumiBlockProducer(edm::ParameterSet const& p) :
 	trans_(p.getParameter<int>("transitions")) {	
     produces<unsigned int>();
+    produces<unsigned int, edm::Transition::BeginLuminosityBlock>("a");
     }
     const unsigned int trans_; 
     mutable std::atomic<unsigned int> m_count{0};
@@ -535,6 +539,7 @@ struct Dummy {
     explicit TestEndLumiBlockProducer(edm::ParameterSet const& p) :
 	trans_(p.getParameter<int>("transitions")) {	
     produces<unsigned int>();
+    produces<unsigned int, edm::Transition::EndLuminosityBlock>("a");
     }
     const unsigned int trans_; 
     mutable std::atomic<unsigned int> m_count{0};

@@ -3,8 +3,9 @@ import FWCore.ParameterSet.Config as cms
 # Start with Standard Digitization:
 
 from SimCalorimetry.Configuration.SimCalorimetry_cff import *
+from SimMuon.Configuration.SimMuon_cff import *
 
-from SimGeneral.DataMixingModule.mixOne_simraw_on_sim_cfi import *
+from SimGeneral.PreMixingModule.mixOne_premix_on_sim_cfi import *
 
 # Run after the DataMixer only.
 #
@@ -14,6 +15,7 @@ from SimGeneral.DataMixingModule.mixOne_simraw_on_sim_cfi import *
 # clone these sequences:
 
 DMEcalTriggerPrimitiveDigis = simEcalTriggerPrimitiveDigis.clone()
+DMEcalEBTriggerPrimitiveDigis = simEcalEBTriggerPrimitiveDigis.clone()
 DMEcalDigis = simEcalDigis.clone()
 DMEcalPreshowerDigis = simEcalPreshowerDigis.clone()
 
@@ -21,6 +23,8 @@ DMEcalPreshowerDigis = simEcalPreshowerDigis.clone()
 DMEcalTriggerPrimitiveDigis.Label = cms.string('mixData')
 DMEcalTriggerPrimitiveDigis.InstanceEB = cms.string('')
 DMEcalTriggerPrimitiveDigis.InstanceEE = cms.string('')
+#
+DMEcalEBTriggerPrimitiveDigis.barrelEcalDigis = 'mixData'
 #
 DMEcalDigis.digiProducer = cms.string('mixData')
 DMEcalDigis.EBdigiCollection = cms.string('')
@@ -31,6 +35,10 @@ DMEcalPreshowerDigis.digiProducer = cms.string('mixData')
 #DMEcalPreshowerDigis.ESdigiCollection = cms.string('ESDigiCollectionDM')
 
 ecalDigiSequenceDM = cms.Sequence(DMEcalTriggerPrimitiveDigis*DMEcalDigis*DMEcalPreshowerDigis)
+from Configuration.Eras.Modifier_phase2_common_cff import phase2_common
+_phase2_ecalDigiSequenceDM = ecalDigiSequenceDM.copy()
+_phase2_ecalDigiSequenceDM.insert(0,DMEcalEBTriggerPrimitiveDigis)
+phase2_common.toReplaceWith(ecalDigiSequenceDM, _phase2_ecalDigiSequenceDM)
 
 # same for Hcal:
 
@@ -48,7 +56,7 @@ DMHcalTTPDigis.HFDigiCollection = cms.InputTag("mixData")
 
 hcalDigiSequenceDM = cms.Sequence(DMHcalTriggerPrimitiveDigis+DMHcalDigis*DMHcalTTPDigis)
 
-postDMDigi = cms.Sequence(ecalDigiSequenceDM+hcalDigiSequenceDM)
+postDMDigi = cms.Sequence(ecalDigiSequenceDM+hcalDigiSequenceDM+muonDigi)
 
 # disable adding noise to HCAL cells with no MC signal
 #mixData.doEmpty = False
@@ -57,7 +65,7 @@ postDMDigi = cms.Sequence(ecalDigiSequenceDM+hcalDigiSequenceDM)
 # TrackingParticle Producer is now part of the mixing module, so
 # it is no longer run here.
 #
-from SimGeneral.PileupInformation.AddPileupSummaryPreMixed_cfi import *
+from SimGeneral.PileupInformation.AddPileupSummary_cfi import *
 
 
 

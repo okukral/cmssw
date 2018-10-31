@@ -2,8 +2,6 @@
 #include "SimG4Core/Application/interface/PrimaryTransformer.h"
 #include "SimG4Core/Application/interface/SimRunInterface.h"
 #include "SimG4Core/Application/interface/RunAction.h"
-#include "SimG4Core/Application/interface/SimTrackManager.h"
-#include "SimG4Core/Application/interface/G4SimEvent.h"
 #include "SimG4Core/Application/interface/ParametrisedEMPhysics.h"
 #include "SimG4Core/Application/interface/CustomUIsession.h"
 #include "SimG4Core/Application/interface/ExceptionHandler.h"
@@ -15,6 +13,9 @@
 #include "SimG4Core/SensitiveDetector/interface/AttachSD.h"
 
 #include "SimG4Core/Physics/interface/PhysicsListFactory.h"
+#include "SimG4Core/PhysicsLists/interface/CMSMonopolePhysics.h"
+#include "SimG4Core/CustomPhysics/interface/CMSExoticaPhysics.h"
+
 #include "SimG4Core/Watcher/interface/SimWatcherFactory.h"
 #include "SimG4Core/MagneticField/interface/FieldBuilder.h"
 #include "SimG4Core/MagneticField/interface/ChordFinderSetter.h"
@@ -23,6 +24,8 @@
 
 #include "MagneticField/Engine/interface/MagneticField.h"
 
+#include "SimG4Core/Notification/interface/G4SimEvent.h"
+#include "SimG4Core/Notification/interface/SimTrackManager.h"
 #include "SimG4Core/Notification/interface/BeginOfJob.h"
 #include "SimG4Core/Notification/interface/CurrentG4Track.h"
 #include "SimG4Core/Application/interface/G4RegionReporter.h"
@@ -86,7 +89,9 @@ RunManagerMT::RunManagerMT(edm::ParameterSet const & p):
   m_currentRun = nullptr;
 
   m_kernel = new G4MTRunManagerKernel();
-  G4StateManager::GetStateManager()->SetExceptionHandler(new ExceptionHandler());
+  m_stateManager = G4StateManager::GetStateManager();
+  m_stateManager->SetExceptionHandler(new ExceptionHandler());
+  m_geometryManager->G4GeometryManager::GetInstance();
 
   m_check = p.getUntrackedParameter<bool>("CheckOverlap",false);
   m_WriteFile = p.getUntrackedParameter<std::string>("FileNameGDML","");
@@ -96,9 +101,7 @@ RunManagerMT::RunManagerMT(edm::ParameterSet const & p):
 
 RunManagerMT::~RunManagerMT() 
 {
-  if(!m_runTerminated) { terminateRun(); }
-  G4StateManager::GetStateManager()->SetNewState(G4State_Quit);
-  G4GeometryManager::GetInstance()->OpenGeometry();
+  stopG4();
 }
 
 void RunManagerMT::initG4(const DDCompactView *pDD, const MagneticField *pMF, 
@@ -106,7 +109,7 @@ void RunManagerMT::initG4(const DDCompactView *pDD, const MagneticField *pMF,
 {
   if (m_managerInitialized) return;
 
-  edm::LogInfo("SimG4CoreApplication") 
+  edm::LogVerbatim("SimG4CoreApplication") 
     << "RunManagerMT: start initialisation of geometry";
   
   // DDDWorld: get the DDCV from the ES and use it to build the World
@@ -115,10 +118,10 @@ void RunManagerMT::initG4(const DDCompactView *pDD, const MagneticField *pMF,
   m_registry.dddWorldSignal_(m_world.get());
 
   // setup the magnetic field
-  edm::LogInfo("SimG4CoreApplication") 
+  edm::LogVerbatim("SimG4CoreApplication") 
     << "RunManagerMT: start initialisation of magnetic field";
 
-  if (m_pUseMagneticField && "" != m_FieldFile)
+  if (m_pUseMagneticField && !m_FieldFile.empty())
     {
       const GlobalPoint g(0.,0.,0.);
       sim::FieldBuilder fieldBuilder(pMF, m_pField);
@@ -131,7 +134,7 @@ void RunManagerMT::initG4(const DDCompactView *pDD, const MagneticField *pMF,
     }
 
   // Create physics list
-  edm::LogInfo("SimG4CoreApplication") 
+  edm::LogVerbatim("SimG4CoreApplication") 
     << "RunManagerMT: create PhysicsList";
 
   std::unique_ptr<PhysicsListMakerBase>
@@ -141,14 +144,21 @@ void RunManagerMT::initG4(const DDCompactView *pDD, const MagneticField *pMF,
     throw edm::Exception( edm::errors::Configuration ) 
       << "Unable to find the Physics list requested";
   }
-  m_physicsList = 
-    physicsMaker->make(map_,fPDGTable,m_chordFinderSetter.get(),m_pPhysics,m_registry);
+  m_physicsList = physicsMaker->make(m_pPhysics,m_registry);
 
   PhysicsList* phys = m_physicsList.get(); 
   if (phys==nullptr) { 
     throw edm::Exception( edm::errors::Configuration,
 			  "Physics list construction failed!"); 
   }
+
+  // exotic particle physics
+  double monopoleMass = m_pPhysics.getUntrackedParameter<double>("MonopoleMass",0);
+  if(monopoleMass > 0.0) {
+    phys->RegisterPhysics(new CMSMonopolePhysics(fPDGTable,m_chordFinderSetter.get(),m_pPhysics));
+  }
+  bool exotica = m_pPhysics.getUntrackedParameter<bool>("ExoticaTransport",false);
+  if(exotica) { CMSExoticaPhysics exo(phys, m_pPhysics); }
 
   // adding GFlash, Russian Roulette for eletrons and gamma, 
   // step limiters on top of any Physics Lists
@@ -158,7 +168,7 @@ void RunManagerMT::initG4(const DDCompactView *pDD, const MagneticField *pMF,
   if (m_RestorePhysicsTables) {
     m_physicsList->SetPhysicsTableRetrieved(m_PhysicsTablesDir);
   }
-  edm::LogInfo("SimG4CoreApplication") 
+  edm::LogVerbatim("SimG4CoreApplication") 
     << "RunManagerMT: start initialisation of PhysicsList for master";
 
   int verb = std::max(m_pPhysics.getUntrackedParameter<int>("Verbosity",0),
@@ -174,6 +184,17 @@ void RunManagerMT::initG4(const DDCompactView *pDD, const MagneticField *pMF,
   }
   
   m_kernel->SetPhysics(phys);
+
+  // Geant4 UI commands before initialisation of physics
+  if(!m_G4Commands.empty()) {
+    G4cout << "RunManagerMT: Requested UI commands: " << G4endl;
+    for (const std::string& command : m_G4Commands) {
+      G4cout << "    " << command << G4endl;
+      G4UImanager::GetUIpointer()->ApplyCommand(command);
+    }
+  }
+
+  m_stateManager->SetNewState(G4State_Init);
   m_kernel->InitializePhysics();
   m_kernel->SetUpDecayChannels();
 
@@ -202,18 +223,10 @@ void RunManagerMT::initG4(const DDCompactView *pDD, const MagneticField *pMF,
 
   initializeUserActions();
 
-  if(!m_G4Commands.empty()) {
-    G4cout << "RunManagerMT: Requested UI commands: " << G4endl;
-    for (unsigned it=0; it<m_G4Commands.size(); ++it) {
-      G4cout << "    " << m_G4Commands[it] << G4endl;
-      G4UImanager::GetUIpointer()->ApplyCommand(m_G4Commands[it]);
-    }
-  }
-
   if(verb > 1) { m_physicsList->DumpCutValuesTable(); }
 
   // geometry dump
-  if("" != m_WriteFile) {
+  if(!m_WriteFile.empty()) {
     G4GDMLParser gdml;
     gdml.SetRegionExport(true);
     gdml.SetEnergyCutsExport(true);
@@ -221,7 +234,7 @@ void RunManagerMT::initG4(const DDCompactView *pDD, const MagneticField *pMF,
   }
 
   // G4Region dump
-  if("" != m_RegionFile) {
+  if(!m_RegionFile.empty()) {
     G4RegionReporter rrep;
     rrep.ReportRegions(m_RegionFile);
   }
@@ -233,7 +246,7 @@ void RunManagerMT::initG4(const DDCompactView *pDD, const MagneticField *pMF,
   //
   //G4ParticleTable::GetParticleTable()->DumpTable("ALL");
   //
-  G4StateManager::GetStateManager()->SetNewState(G4State_GeomClosed);
+  m_stateManager->SetNewState(G4State_GeomClosed);
   m_currentRun = new G4Run(); 
   m_userRunAction->BeginOfRunAction(m_currentRun); 
 }
@@ -252,7 +265,8 @@ void  RunManagerMT::Connect(RunAction* runAction)
 
 void RunManagerMT::stopG4()
 {
-  G4StateManager::GetStateManager()->SetNewState(G4State_Quit);
+  m_geometryManager->OpenGeometry();
+  m_stateManager->SetNewState(G4State_Quit);
   if(!m_runTerminated) { terminateRun(); }
 }
 

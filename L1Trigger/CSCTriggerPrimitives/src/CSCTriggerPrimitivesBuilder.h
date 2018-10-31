@@ -56,15 +56,6 @@ class CSCTriggerPrimitivesBuilder
   void setCSCGeometry(const CSCGeometry *g) { csc_g = g; }
   void setGEMGeometry(const GEMGeometry *g) { gem_g = g; }
 
-  /* temporary function to check if running on data.
-   * Currently in simulation the central BX is BX6; in data
-   * it is BX8. This mismatch in conventions is expeced to
-   * be resolved in the near future. The member runOnData_
-   * is used in the builder to shift the LCT BX readout
-   * with +2 from [3,9] to [5,11].
-   */
-  void runOnData(bool runOnData) {runOnData_ = runOnData;}
-
   /** Build anode, cathode, and correlated LCTs in each chamber and fill
    *  them into output collections.  Select up to three best correlated LCTs
    *  in each (sub)sector and put them into an output collection as well. */
@@ -106,17 +97,17 @@ class CSCTriggerPrimitivesBuilder
   static const int min_chamber;   // chambers per trigger subsector
   static const int max_chamber;
 
-  /// temporary flag to run on data
-  bool runOnData_;
-
   /// a flag whether to skip chambers from the bad chambers map
   bool checkBadChambers_;
 
   /** SLHC: special configuration parameters for ME11 treatment. */
-  bool smartME1aME1b, disableME1a;
+  bool isSLHC_;
 
   /** SLHC: special switch for disabling ME42 */
-  bool disableME42;
+  bool disableME1a_;
+
+  /** SLHC: special switch for disabling ME42 */
+  bool disableME42_;
 
   /** SLHC: special switch for the upgrade ME1/1 TMB */
   bool runME11ILT_;
@@ -130,7 +121,7 @@ class CSCTriggerPrimitivesBuilder
   /** SLHC: special switch to use gem clusters */
   bool useClusters_;
 
-  int m_minBX, m_maxBX; // min and max BX to sort.
+  int m_minBX_, m_maxBX_; // min and max BX to sort.
 
   /** Pointers to TMB processors for all possible chambers. */
   std::unique_ptr<CSCMotherboard>
